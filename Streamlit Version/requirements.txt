@@ -1,0 +1,8 @@
+numpy
+pandas
+scikit-learn
+nltk
+transformers=4.36.2
+torch
+rouge-score
+streamlit
