@@ -21,6 +21,45 @@ embedder = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
 
 
 # -----------------------------
+# REMOVE HEADER (CRITICAL FIX)
+# -----------------------------
+def remove_header(text):
+    if "Experience" in text:
+        text = text.split("Experience", 1)[1]
+    return text
+
+
+# -----------------------------
+# STRONG NOISE REMOVAL (FINAL)
+# -----------------------------
+def remove_noise(text):
+    # remove metadata lines
+    patterns = [
+        r'(?i)id\s*no.*',
+        r'(?i)name\s.*',
+        r'(?i)course\s*name.*',
+        r'(?i)instructor\s*name.*',
+        r'(?i)department.*',
+        r'(?i)branch.*',
+        r'(?i)year.*term.*',
+        r'(?i)assessment\s*type.*',
+        r'(?i)journal\s*entry.*',
+        r'(?i)module\s*number.*'
+    ]
+
+    for p in patterns:
+        text = re.sub(p, '', text)
+
+    # remove ID-like codes (241P1R100)
+    text = re.sub(r'\b[A-Z0-9]{6,}\b', '', text)
+
+    # remove numbers/bullets
+    text = re.sub(r'\b\d+\.\s*', '', text)
+
+    return text
+
+
+# -----------------------------
 # Normalize text
 # -----------------------------
 def normalize_text(text):
@@ -34,8 +73,13 @@ def normalize_text(text):
 # Preprocess
 # -----------------------------
 def preprocess_text(text):
+    text = remove_header(text)
+    text = remove_noise(text)
     text = normalize_text(text)
-    return [s.strip() for s in nltk.sent_tokenize(text) if len(s) > 25]
+
+    sentences = nltk.sent_tokenize(text)
+
+    return [s.strip() for s in sentences if len(s.split()) > 6]
 
 
 # -----------------------------
@@ -53,34 +97,16 @@ def rank_sentences_tfidf(sentences):
         return sorted(((scores[i], s) for i, s in enumerate(sentences)), reverse=True)
 
     except ValueError:
-        # 🔥 fallback if vocabulary empty
         return [(1, s) for s in sentences]
 
-def is_valid_text(text):
-    words = text.split()
-
-    # too short or mostly numbers
-    if len(words) < 30:
-        return False
-
-    alpha_words = [w for w in words if w.isalpha()]
-
-    if len(alpha_words) / len(words) < 0.5:
-        return False
-
-    return True
 
 def tfidf_summary(text):
     sentences = preprocess_text(text)
 
-    if len(sentences) == 0:
+    if not sentences:
         return "No meaningful textual content found."
 
     ranked = rank_sentences_tfidf(sentences)
-
-    if not ranked:
-        return "Unable to generate TF-IDF summary."
-
     return " ".join([s for _, s in ranked[:5]])
 
 
@@ -93,16 +119,24 @@ def key_points(text):
 
     points = []
     for _, s in ranked[:5]:
-        s = s.strip().capitalize()
+        s = re.sub(r'\(.*?\)', '', s)   # remove brackets like (class content)
+        s = s.strip()
+
+        if len(s.split()) < 5:
+            continue
+
+        s = s.capitalize()
+
         if not s.endswith('.'):
             s += '.'
+
         points.append(s)
 
     return points
 
 
 # -----------------------------
-# Remove redundancy
+# Redundancy Removal
 # -----------------------------
 def remove_redundancy(text, threshold=0.75):
     sentences = nltk.sent_tokenize(text)
@@ -110,7 +144,7 @@ def remove_redundancy(text, threshold=0.75):
     if len(sentences) <= 1:
         return text
 
-    sentences = sentences[:25]  # performance safe
+    sentences = sentences[:25]
 
     embeddings = embedder.encode(sentences, convert_to_tensor=True)
 
@@ -132,16 +166,15 @@ def remove_redundancy(text, threshold=0.75):
 
 
 # -----------------------------
-# Cleaning
+# Clean Output
 # -----------------------------
-def clean_sentences(text):
+def clean_and_format(text):
     sentences = nltk.sent_tokenize(text)
 
     cleaned = []
     for s in sentences:
         s = s.strip()
 
-        # remove broken sentence
         if len(s.split()) < 4:
             continue
 
@@ -156,9 +189,11 @@ def clean_sentences(text):
 
 
 # -----------------------------
-# BART (Improved)
+# BART
 # -----------------------------
 def bart_summary(text):
+    text = remove_header(text)
+    text = remove_noise(text)
     text = normalize_text(text)
 
     max_chunk = 500
@@ -174,7 +209,6 @@ def bart_summary(text):
     for chunk in chunks:
         input_len = len(chunk.split())
 
-        # 🔥 improved length (NO over-compression)
         max_len = max(50, min(int(input_len * 0.7), 180))
         min_len = max(30, int(max_len * 0.6))
 
@@ -191,54 +225,35 @@ def bart_summary(text):
     combined = " ".join(summaries)
 
     final = remove_redundancy(combined)
-    final = clean_sentences(final)
+    final = clean_and_format(final)
 
     return final
 
 
 # -----------------------------
-# Structured summary (IMPORTANT)
-# -----------------------------
-def structured_summary(text):
-    sections = re.split(
-        r'(Experience|Feelings|Learning|Application|Conclusion)',
-        text,
-        flags=re.IGNORECASE
-    )
-
-    combined = []
-
-    for part in sections:
-        if len(part.strip()) > 120:
-            combined.append(bart_summary(part))
-
-    return " ".join(combined)
-
-
-# -----------------------------
-# Hybrid
+# Hybrid (STRUCTURE-AWARE)
 # -----------------------------
 def hybrid_summary(text):
-
-    # 🔥 detect academic structure
-    if any(k in text.lower() for k in ["experience", "learning", "application", "conclusion"]):
-        return structured_summary(text)
+    text = remove_header(text)
+    text = remove_noise(text)
 
     sentences = preprocess_text(text)
 
-    if len(sentences) == 0:
+    if not sentences:
         return "Text too short."
 
     ranked = rank_sentences_tfidf(sentences)
 
-    # 🔥 increased context
-    extracted = " ".join([s for _, s in ranked[:5]])
+    # take more sentences to avoid missing concepts
+    extracted = " ".join([s for _, s in ranked[:7]])
 
-    return bart_summary(extracted)
+    summary = bart_summary(extracted)
+
+    return summary
 
 
 # -----------------------------
-# ROUGE
+# ROUGE (FIXED)
 # -----------------------------
 def compute_rouge(reference, generated):
     scorer = rouge_scorer.RougeScorer(
@@ -248,3 +263,20 @@ def compute_rouge(reference, generated):
 
     scores = scorer.score(reference, generated)
     return {k: round(v.fmeasure, 4) for k, v in scores.items()}
+
+
+# -----------------------------
+# Validation
+# -----------------------------
+def is_valid_text(text):
+    words = text.split()
+
+    if len(words) < 30:
+        return False
+
+    alpha_words = [w for w in words if w.isalpha()]
+
+    if len(alpha_words) / len(words) < 0.5:
+        return False
+
+    return True

@@ -93,9 +93,9 @@ def index():
                 reduction = round((1 - summary_len / original_len) * 100, 2)
 
                 rouge_scores = {
-                    "TF-IDF": compute_rouge(tfidf, tfidf),
-                    "BART": compute_rouge(tfidf, bart),
-                    "HYBRID": compute_rouge(tfidf, hybrid)
+                    "TF-IDF": compute_rouge(text, tfidf),
+                    "BART": compute_rouge(text, bart),
+                    "HYBRID": compute_rouge(text, hybrid)
                 }
 
                 result = {

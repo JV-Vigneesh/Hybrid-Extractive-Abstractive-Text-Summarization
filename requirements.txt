@@ -2,10 +2,10 @@ numpy
 pandas
 scikit-learn
 nltk
+torch==2.1.2
 transformers==4.36.2
-torch
+sentence-transformers==2.2.2
+huggingface-hub==0.19.4
 rouge-score
 PyPDF2
 python-docx
-sentence-transformers==2.2.2
-huggingface-hub==0.19.4
